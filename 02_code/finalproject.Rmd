@@ -1,0 +1,618 @@
+---
+title: "POL 212: Final Project"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(dplyr)
+library(labelled)
+library(knitr)
+library(kableExtra)
+library(sjlabelled)
+library(stringr)
+library(haven)
+library(readxl)
+library(here)
+library(stargazer)
+library(broom)
+library(gt)
+
+# Problem with install yikes
+
+# devtools::install_github("lapop-central/lapop", force = TRUE, build_vignettes = TRUE)
+# library(lapop)
+
+# Load the data
+LAPOP <- haven::read_dta("finalproject/01_data/SLV_2021_LAPOP.dta") # Public Opinion data from 2021
+clean_merged = read_rds("finalproject/01_data/clean-merged.rds") # election data from 2021
+violence = read_csv("finalproject/01_data/ACLED Data_2025-11-20.csv")
+
+LAPOP_2019 = haven::read_dta("data/ElSalvador LAPOP AmericasBarometer 2018 v1.0_W.dta") # Public Opinion data from 2019
+
+
+# agrreggated / cleaned data
+clean_merged = read_rds("finalproject/01_data/clean-merged-with-votes.rds")
+
+clean_merged = clean_merged %>%
+  rename(municipio = name)
+
+# Clean data
+
+# Sort LAPOP into Group A and Group B
+
+LAPOP_A = LAPOP %>%
+  filter(core_a_core_b == "Core A") # Group A respondents
+
+
+```
+
+
+Logit with 2018/2019 Data 
+
+T - EDR
+
+idio2 - Do you think that your economic situation is better than, the same   as, or worse than it was 12 months ago?
+
+l1 - Now, to change the subject... On this card there is a 1-10 scale that goes from left to right. The number one means left and 10   means right. Nowadays, when we speak of political leanings, we talk of those on the left and those on the right. In other words,   some people sympathize more with the left and others with the   right. According to the meaning that the terms "left" and "right"   have for you, and thinking of your own political leanings, where   would you place yourself on this scale? Tell me the number.
+
+jc10 - Some people say that under some circumstances it would be justified for the military of this country to take power by a coup   d'état (military coup). In your opinion would a military coup be justified under the following circumstances? When there is a lot   of crime
+
+jc13 - Some people say that under some circumstances it would be justified for the military of this country to take power by a coup   d'état (military coup). In your opinion would a military coup be justified under the following circumstances? When there is a lot   of corruption
+
+jc15a - Do you believe that when the country is facing very difficult times it is justifiable for the president of the country to close   the Legislative Assembly and govern without Legislative Assembly?
+
+jc16a -  Do you believe that when the country is facing very difficult times it is justifiable for the president of the country to   dissolve the Supreme Court of Justice and govern without the Supreme Court of Justice?
+
+vic1ext - Have you been a victim of any type of crime in the past 12 months? That is, have you been a victim of robbery, burglary, assault,   fraud, blackmail, extortion, violent threats or any other type of crime in the past 12 months?
+
+vic1exta - ^ how many times
+
+vicbar7 - Have there been any murders in that last 12 months in your neighborhood?
+
+vicbar7f - How many times did this occur?
+
+fear6fa -  For fear of being a victim of crime, in the last twelve months ... Have you kept your minor children from going to school for fear of   their safety?
+
+vicbar4a - Have you or anyone in your immediate family (children, spouse,   wife) been a victim of extortion in the last 12 months?
+
+aoj11 - Speaking of the neighborhood where you live and thinking of the   possibility of being assaulted or robbed, do you feel very safe,   somewhat safe, somewhat unsafe or very unsafe?
+
+paz1 - Do you consider that the Peace Accords have been very good, good, bad, or very bad for the country?
+
+ing4 -  Changing the subject again, democracy may have problems, but it is better than any other form of government. To what extent do you   agree or disagree with this statement?
+
+aoj22new - To reduce crime in a country like ours, penalties for criminals need to increase. Do you agree or disagree with this statement?
+
+dem30 -  In your opinion, [country] is a democracy?
+
+dem11 - Do you think that our country needs a government with an iron fist, or do you think that problems can be resolved with   everyone's participation?
+
+exc2 - Has a police officer asked you for a bribe in the last twelve months?
+
+
+M1. Hablando en general acerca del gobierno actual, ¿diría usted que el trabajo que está realizando el Presidente Nayib Bukele es...?: [Leer alternativas] (1) Muy bueno  (2) Bueno  (3) Ni bueno, ni malo (regular)  (4) Malo  (5) Muy malo (pésimo)    (888888) [NO LEER] No sabe                (988888) [NO LEER] No responde  (999999) [NO LEER] Inaplicable 
+
+T ING4. Puede que la democracia tenga problemas, pero es mejor que cualquier otra forma de gobierno. ¿Hasta qué punto está de acuerdo o en desacuerdo con esta frase? [SOLO LEER DE SER NECESARIO: Por favor, dígame un número entre 1 y 7]
+
+Going to run a logit on M1 p much
+
+```{r}
+
+# make a positive or negative perception of bukele variable 
+LAPOP = LAPOP %>%
+  mutate(
+    bukele_perception = case_when(
+      m1 %in% c(1,2) ~ "positive",  # Positive perception
+      m1 == 3 ~ "neutral",      # Neutral perception
+      m1 %in% c(4,5) ~ "negative",  # Negative perception
+    ),
+    bukele_perception_dummy = case_when(
+    m1 %in% c(1,2) ~ 1,  # Positive perception
+    m1 %in% c(3,4,5) ~ 0,  # Negative or Neutral perception
+    TRUE ~ NA_integer_    # Handle neutral and missing values
+  ))
+
+# Make a little histogram
+
+# scatterplot of voting intention against support for status quo
+ggplot(data = mydata2, aes(x = vicbar4a, y = bukele_perception_dummy)) +
+  geom_jitter(width = 0.1, height = 0.1, alpha = 0.7, col = "gray66") +
+  geom_hline(yintercept = 1, col = "salmon2", alpha = 0.7, linetype = "dashed") +
+  geom_hline(yintercept = 0, col = "salmon2", alpha = 0.7, linetype = "dashed") +
+  scale_y_continuous(breaks = seq(0, 1, 0.2), labels = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(-1.5, 1.5, 0.5), labels = seq(-1.5, 1.5, 0.5)) +
+  labs(x = "Support for Status Quo", y = "Voting Intention") +
+  theme_bw()
+
+
+LAPOP |> 
+  filter(!is.na(bukele_perception)) |>
+  ggplot(aes(x = bukele_perception)) +
+    geom_bar(fill = "steelblue") +
+    labs(title = "Perception of President Nayib Bukele",
+         x = "Perception Category",
+         y = "Count") +
+    theme_minimal()
+
+# count how many with negaitve vs positive 
+sum(LAPOP$bukele_perception_dummy == 1, na.rm = TRUE)  # Positive perception
+sum(LAPOP$bukele_perception_dummy == 0, na.rm = TRUE)  # Negative perception
+sum(LAPOP$bukele_perception == 'neutral', na.rm = TRUE)  # Positive perception
+```
+
+
+
+```{r}
+# Run logistic regression
+
+# Basic Model: Violence Exposure (vic1ext), Urbanization, Economic Perspective (idio2) Is country a Democracy (dem30), Close legislature (jc15a)
+
+sum(complete.cases(LAPOP[, c("bukele_perception_dummy", "vicbar4a")]))
+
+logit_model <- glm(bukele_perception_dummy ~ vicbar4a + ur1new + idio2 + dem30,
+            data = LAPOP,
+            family = binomial(link = "logit")
+)
+
+stargazer::stargazer(logit_model, digits = 5, type = "text")
+
+exp(coef(logit_model))
+
+
+logit_tidy <- tidy(logit_model, conf.int = TRUE, exponentiate = TRUE) |>
+  mutate(term = case_when(
+    term == "(Intercept)" ~ "Intercept",
+    term == "vicbar4a" ~ "Victimization Index",
+    term == "ur1new" ~ "Crime Perception",
+    term == "idio2" ~ "Ideology (Left–Right)",
+    term == "dem30" ~ "Demographics Index",
+    term == "jc15a" ~ "Trust in Institutions",
+    TRUE ~ term
+  ))
+
+gt(logit_tidy) |>
+  fmt_number(columns = c(estimate, conf.low, conf.high), decimals = 3) |>
+  cols_label(
+    term = "Variable",
+    estimate = "Odds Ratio",
+    std.error = "Std. Error",
+    statistic = "z-value",
+    p.value = "p-value",
+    conf.low = "CI Lower",
+    conf.high = "CI Upper"
+  ) |>
+  tab_header(
+    title = "Logistic Regression Predicting Support for Bukele",
+    subtitle = "Odds ratios with 95% confidence intervals"
+  )
+
+
+logit_plot <- tidy(logit_model, conf.int = TRUE, exponentiate = TRUE) |>
+  filter(term != "(Intercept)") |>
+  mutate(term = factor(term, levels = rev(unique(term))))
+
+ggplot(logit_plot, aes(x = term, y = estimate)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
+  coord_flip() +
+  labs(
+    title = "Effects on Probability of Supporting Bukele",
+    subtitle = "Odds ratios with 95% confidence intervals",
+    x = "",
+    y = "Odds Ratio"
+  ) +
+  theme_classic(base_size = 14)
+
+  
+```
+
+
+
+
+```{r, codebook}
+
+generate_codebook <- function(df) {
+# Extract variable information
+variable_names <- names(df)
+variable_values <- get_label(df)  # Retrieves variable labels
+values <- get_labels(df)          # Retrieves value labels
+variable_types <- sapply(df, class)
+variable_labels <- sapply(df, function(x) attr(x, "label"))
+value_labels <- lapply(df, function(x) attr(x, "labels"))
+
+# Create the codebook dataframe
+codebook <- tibble(
+  Variable = variable_names,
+  Label = variable_values,
+  Type = variable_types,
+) %>%
+  mutate(
+    Values = sapply(value_labels, function(labels) {
+      if (is.null(labels)) return(NA)  # Handle missing labels
+      paste(names(labels), "=", labels, collapse = ", ")
+    })
+  )
+
+}
+
+codebook_LAPOP <- generate_codebook(LAPOP)
+
+# Export the common_codebook to HTML
+codebook_LAPOP %>%
+  kbl(caption = "LAPOP Codebook") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  save_kable("lapop_codebook.html")
+
+```
+
+```{r}
+
+library(survey)
+library(stringi)
+
+
+# Ensure municipality codes are formatted correctly
+LAPOP_clean <- LAPOP %>%
+  mutate(
+    wt = as.numeric(wt),  # Ensure weights are numeric
+    male = ifelse(q1tb == 1, 1, 0), 
+    
+    edr = case_when(
+      edr == 3 ~ 1,
+      edr %in% c(1,2) ~ 0,
+      TRUE ~ NA_integer_
+    ),  # College educated (to some level)
+    
+    q10newt = case_when(
+      q10newt == 31 ~ 1,  # 0-195
+      q10newt == 32 ~ 2,  # 196-350
+      q10newt == 33 ~ 3,  # 351-480
+      q10newt == 34 ~ 4,  # 481-620
+      q10newt == 35 ~ 5,  # 620+
+      TRUE ~ NA_real_  # Assign NA for missing values
+    ), # Income level (5-point scale)
+    
+    jc13 = case_when(
+      jc13 == 1 ~ 1,
+      jc13 == 2 ~ 0,
+      TRUE ~ NA_integer_
+    ),  # State force justified if corruption
+
+    jc15a = case_when(
+      jc15a == 1 ~ 1,
+      jc15a == 2 ~ 0,
+      TRUE ~ NA_integer_
+    ),  # Executive justified in closing the legislature
+
+    vic1ext = case_when(
+      vic1ext == 1 ~ 1,
+      vic1ext == 2 ~ 0,
+      TRUE ~ NA_integer_
+    ),  # Victim of crime in the last 12 months
+
+    b2 = case_when(
+      b2 %in% c(1,2,3) ~ 1,  # No (Respect for institutions)
+      b2 %in% c(5,6,7) ~ 0,  # Yes
+      TRUE ~ NA_integer_
+    ), 
+    
+    b4 = case_when(
+      b4 %in% c(1,2,3) ~ 1,  # No
+      b4 %in% c(5,6,7) ~ 0,  # Yes
+      TRUE ~ NA_integer_
+    ), # 	Orgullo por el sistema político
+    
+    b21 = case_when(
+      b21 %in% c(1,2,3) ~ 1,  # No 
+      b21 %in% c(5,6,7) ~ 0,  # Yes
+      TRUE ~ NA_integer_
+    ) # 	Confianza en los partidos políticos
+  ) %>%
+  select(
+    prov1t, # Departamento
+    municipio1t, # Municipio
+    wt, 
+    strata,
+    
+    male,   
+    edr,     # College educated (to some level)
+    q10newt, # Income level (5-point scale)
+    
+    jc13, # Force by the state is justified when there is a lot of corruption
+    jc15a, # The executive is justified in closing the legislature
+    vic1ext, # Victim of crime in the last 12 months
+    b2, # Respect for institutions
+    b4, # Pride in political system
+    b21 # Confidence in political parties
+  ) %>%
+
+# Keep relevant columns
+  filter(!is.na(municipio1t) & !is.na(wt))  # Remove rows with missing municipality codes or weights
+
+# Ensure weight variable has no missing values
+LAPOP_clean <- LAPOP_clean %>%
+  filter(!is.na(wt) & wt > 0)
+
+# Define survey design (accounting for stratification & weights)
+survey_design <- svydesign(
+  id = ~1,  # No clustering at this level (if there's a PSU variable, replace 1 with it)
+  strata = ~strata,  # Use correct stratification variable (modify if needed)
+  weights = ~wt,  # Apply probability weights
+  data = LAPOP_clean
+)
+
+# Compute weighted means & counts by municipality
+muni_LAPOP_weighted <- LAPOP_clean %>%
+  group_by(municipio1t) %>%
+  summarise(
+    pct_male = sum(male * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_male = sum(!is.na(male)),  
+
+    pct_edr = sum(edr * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_edr = sum(!is.na(edr)),  
+
+    avg_income_lvl = sum(q10newt * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE),  # Income as continuous
+    n_income = sum(!is.na(q10newt)),  
+
+    pct_force_justified = sum(jc13 * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_force_justified = sum(!is.na(jc13)),
+
+    pct_exec_close_leg = sum(jc15a * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_exec_close_leg = sum(!is.na(jc15a)),
+
+    pct_vic_crime = sum(vic1ext * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_vic_crime = sum(!is.na(vic1ext)),
+
+    pct_respect_inst = sum(b2 * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_respect_inst = sum(!is.na(b2)),
+
+    pct_pride_political_system = sum(b4 * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_pride_political_system = sum(!is.na(b4)),
+
+    pct_confidence_parties = sum(b21 * wt, na.rm = TRUE) / sum(wt, na.rm = TRUE) * 100,
+    n_confidence_parties = sum(!is.na(b21)),
+
+    n_total = sum(!is.na(male) | !is.na(edr) | !is.na(q10newt) | !is.na(jc13) | !is.na(jc15a) | !is.na(vic1ext) | !is.na(b2) | !is.na(b4) | !is.na(b21))
+  ) %>%
+  ungroup()
+
+
+```
+
+```{r}
+# Compute unweighted means & counts by municipality
+muni_LAPOP <- LAPOP_clean %>%
+  group_by(municipio1t) %>%
+  summarise(
+    pct_male = ifelse(sum(!is.na(male)) == 0, NA, mean(male, na.rm = TRUE) * 100),
+    n_male = sum(!is.na(male)),  
+
+    pct_edr = ifelse(sum(!is.na(edr)) == 0, NA, mean(edr, na.rm = TRUE) * 100),
+    n_edr = sum(!is.na(edr)),  
+
+    avg_income_lvl = ifelse(sum(!is.na(q10newt)) == 0, NA, mean(q10newt, na.rm = TRUE)),  # Income as continuous
+    n_income = sum(!is.na(q10newt)),  
+
+    pct_force_justified = ifelse(sum(!is.na(jc13)) == 0, NA, mean(jc13, na.rm = TRUE) * 100),
+    n_force_justified = sum(!is.na(jc13)),
+
+    pct_exec_close_leg = ifelse(sum(!is.na(jc15a)) == 0, NA, mean(jc15a, na.rm = TRUE) * 100),
+    n_exec_close_leg = sum(!is.na(jc15a)),
+
+    pct_vic_crime = ifelse(sum(!is.na(vic1ext)) == 0, NA, mean(vic1ext, na.rm = TRUE) * 100),
+    n_vic_crime = sum(!is.na(vic1ext)),
+
+    pct_respect_inst = ifelse(sum(!is.na(b2)) == 0, NA, mean(b2, na.rm = TRUE) * 100),
+    n_respect_inst = sum(!is.na(b2)),
+
+    pct_pride_political_system = ifelse(sum(!is.na(b4)) == 0, NA, mean(b4, na.rm = TRUE) * 100),
+    n_pride_political_system = sum(!is.na(b4)),
+
+    pct_confidence_parties = ifelse(sum(!is.na(b21)) == 0, NA, mean(b21, na.rm = TRUE) * 100),
+    n_confidence_parties = sum(!is.na(b21)),
+
+    n_total = sum(!is.na(male) | !is.na(edr) | !is.na(q10newt) | !is.na(jc13) | !is.na(jc15a) | 
+                  !is.na(vic1ext) | !is.na(b2) | !is.na(b4) | !is.na(b21))
+  ) %>%
+  ungroup()
+
+```
+
+
+
+```{r}
+
+# Extract municipality and department mappings from `codebook_LAPOP`
+location_df <- codebook_LAPOP %>%
+  filter(Variable %in% c("municipio1t", "prov1t")) %>%  # Select municipio1t & prov1t
+  select(Variable, Values) %>%  # Extract relevant columns
+  separate_rows(Values, sep = ", ") %>%  # Split each mapping into its own row
+  mutate(
+    location_name = str_extract(Values, "^[^=]+"),  # Extract name before "="
+    location_code = str_extract(Values, "(?<=\\= )\\d+")  # Extract numeric code after "="
+  ) %>%
+  select(Variable, location_code, location_name) %>%
+  mutate(location_code = as.character(location_code))  # Convert codes to character for merging
+
+# Create separate dataframes for municipalities and departments
+muni_df <- location_df %>% 
+  filter(Variable == "municipio1t") %>% 
+  select(-Variable) %>% 
+  rename(municipio1t = location_code, municipality_name = location_name)
+
+dept_df <- location_df %>% 
+  filter(Variable == "prov1t") %>% 
+  select(-Variable) %>% 
+  rename(prov1t = location_code, department_name = location_name)
+
+# Convert codes to character type in LAPOP for correct merging
+LAPOP <- LAPOP %>%
+  mutate(
+    municipio1t = as.character(municipio1t),
+    prov1t = as.character(prov1t)
+  ) %>%
+  left_join(muni_df, by = "municipio1t") %>%  # Merge municipality names
+  left_join(dept_df, by = "prov1t")  # Merge department names
+
+
+LAPOP2 = LAPOP %>%
+  select(department_name, prov1t, municipality_name, municipio1t) %>%
+  distinct(municipio1t,.keep_all = TRUE) %>%
+  rename(municipio = municipality_name,
+         departamento = department_name)
+
+library(stringi) 
+
+LAPOP2 = LAPOP2 %>% 
+  mutate(municipio = str_trim(tolower(stri_trans_general(municipio, "Latin-ASCII"))),
+         departamento = str_trim(tolower(stri_trans_general(departamento, "Latin-ASCII"))))
+
+LAPOP2$municipio[LAPOP2$municipio == "nahulingo"] = "nahuilingo"
+LAPOP2$municipio[LAPOP2$municipio == "san jose"] = "san jose las fuentes"
+LAPOP2$municipio[LAPOP2$municipio == "san antonio"] = "san antonio del mosco"
+LAPOP2$municipio[LAPOP2$municipio == "oscicala"] = "osicala"
+
+# Check if values now match
+intersect(clean_merged$municipio, LAPOP2$municipio) %>% length()
+
+merged_check = clean_merged %>%
+  select(departamento, municipio)
+
+missing_in_LAPOP2 <- merged_check %>%
+  anti_join(LAPOP2, by = "municipio") %>%
+  distinct(municipio, .keep_all = TRUE)
+
+missing_in_merged <- LAPOP2 %>%
+  anti_join(merged_check, by = "municipio") %>%
+  distinct(municipio, .keep_all = TRUE)
+
+merged_one <- left_join(clean_merged, LAPOP2, by = c("departamento" = "departamento", 
+                                                     "municipio" = "municipio"))
+
+```
+
+```{r}
+
+merged_one = merged_one %>%
+  mutate(municipio1t = as.double(municipio1t))
+
+merged = left_join(merged_one, muni_LAPOP, by = "municipio1t")
+
+saveRDS(merged, "finalproject/01_data/clean_output.rds")
+```
+
+
+```{r}
+clean_merged = readRDS("finalproject/01_data/clean_output.rds")
+names(clean_merged)
+
+# Run the OLS regression
+model_bukele <- lm(n_share ~ avg_income_lvl +
+                     pct_force_justified + pct_exec_close_leg + pct_vic_crime + 
+                     pct_respect_inst + pct_pride_political_system + pct_confidence_parties + 
+                     densidad + percent_urbano + masculinidad + relacion_dependencia + 
+                     x60_anos_y_mas + tgf + tmi + tasa_analfabetismo + asistencia_escolar +
+                     agua_potable + electricidad + sin_servicio_sanitario + con_piso_de_tierra,
+                   data = clean_merged)
+
+model_simplified <- lm(n_share ~ 
+                         avg_income_lvl + percent_urbano + tasa_analfabetismo + 
+                         sin_servicio_sanitario +
+                          masculinidad +
+                         pct_force_justified + pct_exec_close_leg + pct_vic_crime,
+                       data = clean_merged)
+
+model3 <- lm(n_share ~ 
+                         avg_income_lvl + percent_urbano + tasa_analfabetismo + 
+                        masculinidad +
+                         pct_force_justified + pct_exec_close_leg + pct_vic_crime,
+                       data = clean_merged)
+
+library(stargazer)
+stargazer(model_bukele, model_simplified, model3, type = "text")
+
+library(car)
+vif(model_bukele)
+vif(model_simplified)
+
+
+```
+
+```{r}
+
+model1 <- lm(n_share ~ pct_vic_crime, data = clean_merged)
+
+# Model 2: Adding demographic and economic controls (including avg_ideology for future me)
+model2 <- lm(n_share ~ pct_vic_crime + percent_urbano + avg_income_lvl + pct_edr, 
+             data = clean_merged)
+
+model3 = lm(n_share ~ violent_event, data = clean_merged)
+
+model4 <- lm(n_share ~ violent_event + pct_vic_crime + percent_urbano + avg_income_lvl + pct_edr, 
+             data = clean_merged)
+
+stargazer(model1, model2, model3, model4, type = "text",
+          title = "Regression Results: Violent Crime and Bukele Support",
+          dep.var.labels = "Nueva Ideas Vote Share (%)",
+          digits = 3)
+
+# Model 3: Adding economic perceptions (mediation test) while controlling for avg_ideology
+model3 <- lm(pct_trump ~ pos_change_gdp + avg_ideology + pct_collgrad + avg_income + pct_white + pct_romney + 
+               pct_pos_perception_econ, data = county_election)
+
+# Model 4: Including interaction effects for ideology (moderation test)
+model4 <- lm(pct_trump ~ pos_change_gdp * avg_ideology + pct_collgrad + avg_income + pct_white + pct_romney + pct_pos_perception_econ * avg_ideology, data = county_election)
+
+# Output regression results in a table
+stargazer(model1, model2, model3, model4, type = "text",
+          title = "Regression Results: GDP Growth and Trump Support",
+          dep.var.labels = "Trump Vote Share (%)",
+          digits = 3)
+```
+
+
+
+```{r}
+library(ggdag)
+library(dagitty)
+library(ggplot2)
+
+
+dag_model <- dagify(
+  Vote_Share ~ Political_Trust + Political_Satisfaction + State_Force_Justified + 
+               Illiteracy + Poverty + Urbanization + Infrastructure,
+  Political_Trust ~ Illiteracy + Urbanization,
+  Political_Satisfaction ~ Political_Trust + Infrastructure,
+  Poverty ~ Illiteracy + Urbanization + Infrastructure,
+  Infrastructure ~ Urbanization,
+  exposure = "Illiteracy",
+  outcome = "Vote_Share",
+  labels = c(
+    Vote_Share = "Bukele's Vote Share",
+    Political_Trust = "Trust in Institutions",
+    Political_Satisfaction = "Satisfaction with Political System",
+    State_Force_Justified = "Belief State Force is Justified",
+    Illiteracy = "Illiteracy Rate",
+    Poverty = "Poverty Level",
+    Urbanization = "Urbanization",
+    Infrastructure = "Access to Infrastructure"
+  )
+)
+
+ggdag_status(dag_model, use_labels = "label", text = FALSE) +
+  guides(fill = "none", color = "none") +
+  theme_dag()
+
+```
+
+
+
+
