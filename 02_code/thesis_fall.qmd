@@ -1,0 +1,376 @@
+---
+title: "Thesis"
+author: Luca Alioto
+format:
+  pdf:
+    include-in-header:
+      text: |
+        \usepackage{tikz}
+        \usetikzlibrary{calc, arrows.meta, matrix, positioning}
+        \usepackage{caption}
+        \usepackage{fancyhdr}
+        \usepackage{titling}
+        \usepackage{mathptmx} % Times-like font
+
+        % ---- Fancy header ----
+        \pagestyle{fancy}
+        \fancypagestyle{plain}{\pagestyle{fancy}}
+        \fancyhf{}
+        \fancyhead[L]{POL 194HA}
+        \fancyhead[R]{\thepage}
+
+        % ---- Fancy title formatting ----
+        \pretitle{\begin{center}\bfseries\LARGE}
+        \posttitle{\par\end{center}\vskip 0.5em}
+        \preauthor{\begin{center}\large}
+        \postauthor{\par\end{center}\vskip 1em}
+
+execute:
+  echo: false
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+## **Introduction**
+
+```{r setup, include=FALSE}
+library(knitr)
+library(here)
+## opts_knit$set(root.dir = here::here("01_thesis_replication"))
+```
+
+```{r, include=FALSE}
+# Load necessary libraries
+library(tidyverse)
+library(dplyr)
+library(labelled)
+library(kableExtra)
+library(sjlabelled)
+library(stringr)
+library(haven)
+library(readxl)
+library(stargazer)
+library(broom)
+library(gt)
+
+LAPOP <- haven::read_dta(here("01_data/02_lapop/SLV_2021_LAPOP.dta")) # Public Opinion data from 2021
+
+LAPOP_A = LAPOP %>%
+  filter(core_a_core_b == "Core A") # Group A respondents
+```
+
+```{r}
+
+# Clean varibles
+# make a positive or negative perception of bukele variable 
+LAPOP = LAPOP %>%
+  mutate(
+    bukele_perception = case_when(
+      m1 %in% c(1,2) ~ "positive",  # Positive perception
+      m1 == 3 ~ "neutral",      # Neutral perception
+      m1 %in% c(4,5) ~ "negative",  # Negative perception
+    ),
+    bukele_perception_dummy = case_when(
+    m1 %in% c(1,2) ~ 1,  # Positive perception
+    m1 %in% c(3,4,5) ~ 0,  # Negative or Neutral perception
+    TRUE ~ NA_integer_    # Handle neutral and missing values
+  ))
+
+clean_lapop <- function(x) {
+  case_when(
+    x %in% c(888888, 988888, 999999) ~ NA_real_,
+    TRUE ~ as.numeric(x)
+  )
+}
+
+# Select relevant variables and clean
+
+LAPOP_Model <- LAPOP %>%
+  select(
+    bukele_perception, bukele_perception_dummy,
+    vicbar4a, sgl1, ur1new, idio2, jc13
+  ) %>%
+  
+  # 1) remove LAPOP junk codes
+  mutate(
+    vicbar4a = clean_lapop(vicbar4a),
+    sgl1     = clean_lapop(sgl1),
+    ur1new   = clean_lapop(ur1new),
+    idio2    = clean_lapop(idio2),
+    jc13     = clean_lapop(jc13)
+  ) %>%
+  
+  # 2) create factors / dummies for the model
+  mutate(
+    # CA VICBAR4A: extorsión víctima (0 = No, 1 = Sí)
+    vicbar4a = as.numeric(vicbar4a),   # keep as 0/1 numeric
+    
+    # CA SGL1: evaluación servicios municipales
+    sgl1_fac = factor(
+      sgl1,
+      levels = c(1, 2, 3, 5),
+      labels = c("Muy buenos", "Buenos", "Ni buenos ni malos", "Muy malos")
+    ),
+
+    # T UR1NEW: tipo de lugar donde vive
+    ur1new_fac = factor(
+      ur1new,
+      levels = c(1, 2, 3, 4),
+      labels = c("Ciudad", "Periferia de ciudad",
+                 "Pueblo cercano a zona rural", "Zona rural")
+    ),
+
+    # CA JC13: golpe de Estado justificado frente a corrupción
+    jc13_dummy = case_when(
+      jc13 == 1 ~ 1,   # Se justificaría
+      jc13 == 2 ~ 0,   # No se justificaría
+      TRUE ~ NA_real_
+    ),
+
+    # T IDIO2: situación económica actual vs hace 12 meses
+    idio2_fac = factor(
+      idio2,
+      levels = c(1, 2, 3),
+      labels = c("Mejor", "Igual", "Peor")
+    )
+  ) %>%
+  
+  # 3) drop rows with missing on any variables used in the model
+  filter(
+    !is.na(bukele_perception_dummy),
+    !is.na(vicbar4a),
+    !is.na(sgl1_fac),
+    !is.na(ur1new_fac),
+    !is.na(jc13_dummy),
+    !is.na(idio2_fac)
+  )
+
+
+```
+
+```{r}
+# Run logistic regression
+
+logit_model <- glm(
+  bukele_perception_dummy ~ vicbar4a + sgl1_fac + ur1new_fac +
+    jc13_dummy + idio2_fac,
+  data = LAPOP_Model,
+  family = binomial(link = "logit")
+)
+
+summary(logit_model)
+
+stargazer::stargazer(logit_model, digits = 5, type = "text")
+
+exp(coef(logit_model))
+
+logit_tidy <- tidy(logit_model, conf.int = TRUE, exponentiate = TRUE) |>
+  mutate(term = case_when(
+    term == "(Intercept)" ~ "Intercept",
+    term == "vicbar4a" ~ "Victimization Index",
+    term == "ur1new" ~ "Crime Perception",
+    term == "idio2" ~ "Ideology (Left–Right)",
+    term == "dem30" ~ "Demographics Index",
+    term == "jc15a" ~ "Trust in Institutions",
+    TRUE ~ term
+  ))
+
+gt(logit_tidy) |>
+  fmt_number(columns = c(estimate, conf.low, conf.high), decimals = 3) |>
+  cols_label(
+    term = "Variable",
+    estimate = "Odds Ratio",
+    std.error = "Std. Error",
+    statistic = "z-value",
+    p.value = "p-value",
+    conf.low = "CI Lower",
+    conf.high = "CI Upper"
+  ) |>
+  tab_header(
+    title = "Logistic Regression Predicting Support for Bukele",
+    subtitle = "Odds ratios with 95% confidence intervals"
+  )
+
+
+logit_plot <- tidy(logit_model, conf.int = TRUE, exponentiate = TRUE) |>
+  filter(term != "(Intercept)") |>
+  mutate(term = factor(term, levels = rev(unique(term))))
+
+ggplot(logit_plot, aes(x = term, y = estimate)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
+  coord_flip() +
+  labs(
+    title = "Effects on Probability of Supporting Bukele",
+    subtitle = "Odds ratios with 95% confidence intervals",
+    x = "",
+    y = "Odds Ratio"
+  ) +
+  theme_classic(base_size = 14)
+
+  
+```
+
+> **How does exposure to state and criminal violence influence support for President Bukele and authoritarian policies in El Salvador?**
+
+### **Research Design**
+
+To examine the association between exposure to violence and
+
+\begin{center}
+\begin{tikzpicture}[
+    var/.style={circle, draw=none, fill=none, inner sep=2pt, font=\small\bfseries},
+    direct/.style={->, >=Latex, thick},
+    interact/.style={->, >=Latex, thick, dashed}
+]
+
+    % --- MAIN AXIS (Centered on 0,0) ---
+    \node[var] (v0) at (-3, 0) {Ex};   % IV: Extortion (Left)
+    \node[var] (v1) at (3, 0) {B};    % DV: Bukele Support (Right)
+
+    % --- THE MODERATOR (Centered Top) ---
+    % Sits exactly on the Y-axis above the midpoint
+    \node[var] (v7) at (0, 1) {Ec};   % Ec: Econ Perceptions
+
+    % --- LEFT SIDE (Background/Confounders) ---
+    \node[var] (v2) at (-3, 1.5) {U};    % Urban (Above Ex)
+    \node[var] (v4) at (-1.5, 2.5) {Inc}; % Income (Higher up, between U and Ec)
+    \node[var] (v3) at (-1.5, -1.5) {W};  % Welfare (Below path)
+
+    % --- RIGHT SIDE (Outcomes/Controls) ---
+    \node[var] (v5) at (3, 1.5) {Id};    % Ideology (Above B)
+    \node[var] (v6) at (1.5, -1.5) {C};   % Corruption (Below path)
+
+
+    % --- ARROWS ---
+    
+    % 1. The Main Path (Ex -> B)
+    % We set a coordinate at (0,0) which is now the exact center
+    \draw[direct] (v0) -- (v1) coordinate[midway] (midpoint);
+    
+    % 2. The Interaction (Ec -> Center)
+    \draw[interact] (v7) -- (midpoint);
+    
+    % 3. Moderator Direct Effect
+    \draw[direct] (v7) -- (v1);
+
+    % --- CONTROL PATHS ---
+    
+    % Urban (The Confounder)
+    \draw[direct] (v2) -- (v0);   % U -> Ex
+    \draw[direct] (v2) -- (v7);   % U -> Ec
+    \draw[direct] (v2) -- (v5);   % U -> Id
+    \draw[direct] (v2) -- (v4);   % U -> Inc (Included as requested!)
+    
+    % Income
+    \draw[direct] (v4) -- (v7);   % Inc -> Ec
+    \draw[direct] (v4) -- (v5);   % Inc -> Id
+    
+    % Ideology & Corruption
+    \draw[direct] (v5) -- (v1);
+    \draw[direct] (v6) -- (v1);
+    
+    % Welfare (Optional path)
+    \draw[direct] (v0) -- (v3);
+    \draw[direct] (v3) -- (v1);
+
+\end{tikzpicture}
+\end{center}
+
+\begin{tikzpicture}
+\node[align=left, font=\scriptsize, anchor=west] at (0,0) {
+\textbf{Legend} \\
+\textbf{Ex} = Exposure to Extortion (IV) \\
+\textbf{B} = Support for Bukele (DV) \\
+\textbf{Ec} = Economic Perceptions (Moderator) \\
+U = Urbanization \\
+Inc = Income \\
+Id = Ideology \\
+C = Perceptions of Corruption \\
+W = Exposure to Welfare
+};
+\end{tikzpicture} 
+
+economic conditions and support for democratic governance under Bukele, I employ a quantitative research design utilizing survey data from the 2023 LAPOP AmericasBarometer for El Salvador. The analysis focuses on individual-level responses to questions regarding experiences of state violence, perceptions of economic well-being, and attitudes toward democracy.@meléndez-sánchez2023a
+
+### Theory: Data-Generating Process (DGP)
+
+\begin{center}
+
+\begin{tikzpicture}[
+    var/.style={align=center, font=\small}, % <-- NO boxes NOW
+    direct/.style={->, thick}
+]
+
+% --- Nodes (Letter Labels, No Boxes) ---
+\node[var] (v0) at (-4,-0.5) {Ex};
+\node[var] (v1) at (4,-0.5) {B};
+\node[var] (v2) at (-4,1) {U};
+\node[var] (v3) at (0,-1.75) {W};
+\node[var] (v4) at (-2,2.25) {Inc};
+\node[var] (v5) at (0.5,1) {Id};
+\node[var] (v6) at (2,-2) {C};
+\node[var] (v7) at (2,1.25) {Ec};
+
+% --- Arrows ---
+\draw[direct] (v2) edge (v0);
+\draw[direct] (v5) edge (v1);
+\draw[direct] (v0) edge (v3);
+\draw[direct] (v3) edge (v1);
+\draw[direct] (v2) edge (v5);
+\draw[direct] (v2) edge (v1);
+\draw[direct] (v4) edge (v5);
+\draw[direct] (v6) edge (v1);
+\draw[direct] (v4) edge (v7);
+\draw[direct] (v7) edge (v1);
+\draw[direct] (v2) edge (v4);
+\draw[direct] (v0) edge (v1);
+
+\end{tikzpicture}
+
+\end{center}
+\begin{tikzpicture}
+\node[align=left, font=\scriptsize, anchor=west] at (0,0) {
+\textbf{Legend} \\
+Ex = Exposure to Extortion \\
+W = Exposure to Welfare \\
+U = Urbanization \\
+Inc = Income \\
+Id = Ideology \\
+Ec = Economic Perceptions \\
+C = Perceptions of Corruption \\
+B = Support for Bukele
+};
+\end{tikzpicture}
+
+
+CA VICBAR4A. ¿Ha sido usted o alguien de su familia inmediata (hijos, esposo, esposa) víctima de extorsión en los últimos 12 meses? (1) Sí (0) No (888888) \[NO LEER\] No sabe (988888) \[NO LEER\] No responde (999999) \[NO LEER\] Inaplicable
+
+CA SGL1. ¿Diría usted que los servicios que la municipalidad está dando a la gente son: \[Leer alternativas\] (1) Muy buenos (2) Buenos (3) Ni buenos ni malos (regulares) (5) Muy malos (pésimos) (888888) \[NO LEER\] No sabe (988888) \[NO LEER\] No responde (999999) \[NO LEER\] Inaplicable
+
+T UR1NEW. ¿Usted vive en \[Leer alternativas\]? \[Si el encuestado no se encuentra en su lugar de residencia habitual, pedir que responda por su lugar de residencia más frecuente durante los últimos 12 meses\] (1) Una ciudad (2) En la periferia o alrededores de una ciudad (3) En un pueblo/poblado cercano a una zona/ un área rural (4) En un área/ una zona rural (888888) \[NO LEER\] No sabe (988888) \[NO LEER\] No responde
+
+Alguna gente dice que en ciertas circunstancias se justificaría que los militares de este país tomen el poder por un golpe de Estado. En su opinión se justificaría que hubiera un golpe de Estado por los militares… CA JC13. Frente a mucha corrupción. \[Leer alternativas\] \[NO LEER\] (1) Se justificaría (2) No se justificaría \[NO LEER\] No sabe (888888) No responde (988888) \[NO LEER\] Inaplicable (999999)
+
+T IDIO2. ¿Considera usted que su situación económica actual es mejor, igual o peor que la de hace doce meses? (1) Mejor \[Pasa a FS2\] (2) Igual \[Pasa a FS2\] (3) Peor \[Sigue\] (888888) \[NO LEER\] No sabe \[Pasa a FS2\] (988888) \[NO LEER\] No responde \[Pasa a FS2\]
+
+### Limitations
+
+Note: This submission focuses on the LAPOP survey data from 2021. That said,there are a couple of limitations with this data set that need to be addressed before the finalization of this paper.
+
+Currently, I am examining different approaches to aggregation and measures of my variables using the following data sets:
+
+2021 Legislative Election Data (n = 262)
+
+-   Municipality Vote share for each party
+-   Bukele’s Party as opposed to direct vote
+
+DIGESTYC - Census (Similar to ACS) 2021 - Municipality level demographic data
+
+ACLED Conflict Data - Gang and State Violence events from 2018 to 2024
+
+CSES 2019 Post-Election Survey (El Salvador) - Comparative Study of Electoral Systems (CSES)
+
+[@castro; @gellman2022; @meléndez-sánchez2023; @meléndez-sánchez2023a]

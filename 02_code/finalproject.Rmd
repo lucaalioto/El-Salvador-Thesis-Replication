@@ -1,12 +1,20 @@
 ---
-title: "POL 212: Final Project"
+title: 'POL 212: Final Project'
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancypagestyle{plain}{\pagestyle{fancy}}
+- \fancyhead[L]{}
+- \fancyhead[C]{}
+- \fancyhead[R]{}
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
 library(knitr)
 library(here)
 
-opts_knit$set(root.dir = here::here("01_thesis_replication"))
+# opts_knit$set(root.dir = here::here("01_thesis_replication"))
 opts_chunk$set(echo = TRUE)
 ```
 
@@ -23,6 +31,7 @@ library(readxl)
 library(stargazer)
 library(broom)
 library(gt)
+library(scales)  
 
 # Problem with install yikes
 
@@ -31,7 +40,11 @@ library(gt)
 
 # Load the data
 LAPOP <- haven::read_dta(here("01_data/02_lapop/SLV_2021_LAPOP.dta")) # Public Opinion data from 2021
+LAPOP23 = haven::read_dta(here("01_data/02_lapop/SLV_2023_LAPOP_AmericasBarometer_v1.0_w.dta")) # Public Opinion data from 2023
 violence = read_csv(here("01_data/ACLED Data_2025-11-20.csv"))
+load(here("01_data/cses5.rdata"))
+
+ # CSES data from 2019
 
 LAPOP_2019 = haven::read_dta(here("01_data/02_lapop/ElSalvador LAPOP AmericasBarometer 2018 v1.0_W.dta")) # Public Opinion data from 2019
 
@@ -43,61 +56,70 @@ clean_merged = clean_merged %>%
 
 # Clean data
 
+cses5_el = cses5 %>%
+  filter(E1004 == 'SLV_2019')
+rm(cses5)
+unique(cses5_el$E3013_PR_1)
+
+# Calculate the total percent of each response 
+election = cses5_el %>% 
+  select(E3013_PR_1) %>% 
+  group_by(E3013_PR_1) %>% 
+  dplyr::filter(E3013_PR_1 %in% c("222001","222002","222003","222004")) %>%
+  summarise(count = n()) %>%
+  mutate(percent = count / sum(count) * 100) 
+
+# Conclusion is that I cant use this data rip
+
 # Sort LAPOP into Group A and Group B
 
 LAPOP_A = LAPOP %>%
   filter(core_a_core_b == "Core A") # Group A respondents
+```
 
+```{r}
+# Make a voted for bukele variable
+
+LAPOP23 = LAPOP23 %>%
+  filter(!vb3n %in%  c(888888, 988888, 999999)) %>%
+  mutate(voted_bukele = ifelse(vb3n == 1, 1, 0),
+         vote_2019 = case_when(
+           vb3n == 00 ~ "Left Blank",
+           vb3n == 97 ~ "Annulled",
+           vb3n == 301 ~ "Nayib Bukele",
+           vb3n == 302 ~ "Carlos Calleja - ARENA",
+           vb3n == 303 ~ "Hugo Martínez - FMLN",
+           vb3n == 304 ~ "Josué Alvarado - VAMOS",
+           vb3n == 307 ~ "Other Candidate",
+           TRUE ~ NA_character_
+         ))
+
+# See the distribution by percentage
+
+
+vote_summary <- LAPOP23 |>
+  filter(!is.na(vote_2019)) |>
+  count(vote_2019, name = "n") |>
+  mutate(pct = n / sum(n))
+
+vote_summary |>
+  ggplot(aes(x = reorder(vote_2019, -pct), y = pct)) +
+  geom_col(fill = "steelblue") +
+  geom_text(
+    aes(label = paste0("n = ", n)),
+    vjust = -0.4,
+    size = 3
+  ) +
+  scale_y_continuous(labels = percent_format(), expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title = "2019 Presidential Election Vote Choice",
+    x = "Candidate",
+    y = "Percent of respondents"
+  ) +
+  theme_classic()
 
 ```
 
-Logit with 2018/2019 Data
-
-T - EDR
-
-idio2 - Do you think that your economic situation is better than, the same as, or worse than it was 12 months ago?
-
-l1 - Now, to change the subject... On this card there is a 1-10 scale that goes from left to right. The number one means left and 10 means right. Nowadays, when we speak of political leanings, we talk of those on the left and those on the right. In other words, some people sympathize more with the left and others with the right. According to the meaning that the terms "left" and "right" have for you, and thinking of your own political leanings, where would you place yourself on this scale? Tell me the number.
-
-jc10 - Some people say that under some circumstances it would be justified for the military of this country to take power by a coup d'état (military coup). In your opinion would a military coup be justified under the following circumstances? When there is a lot of crime
-
-jc13 - Some people say that under some circumstances it would be justified for the military of this country to take power by a coup d'état (military coup). In your opinion would a military coup be justified under the following circumstances? When there is a lot of corruption
-
-jc15a - Do you believe that when the country is facing very difficult times it is justifiable for the president of the country to close the Legislative Assembly and govern without Legislative Assembly?
-
-jc16a - Do you believe that when the country is facing very difficult times it is justifiable for the president of the country to dissolve the Supreme Court of Justice and govern without the Supreme Court of Justice?
-
-vic1ext - Have you been a victim of any type of crime in the past 12 months? That is, have you been a victim of robbery, burglary, assault, fraud, blackmail, extortion, violent threats or any other type of crime in the past 12 months?
-
-vic1exta - \^ how many times
-
-vicbar7 - Have there been any murders in that last 12 months in your neighborhood?
-
-vicbar7f - How many times did this occur?
-
-fear6fa - For fear of being a victim of crime, in the last twelve months ... Have you kept your minor children from going to school for fear of their safety?
-
-vicbar4a - Have you or anyone in your immediate family (children, spouse, wife) been a victim of extortion in the last 12 months?
-
-aoj11 - Speaking of the neighborhood where you live and thinking of the possibility of being assaulted or robbed, do you feel very safe, somewhat safe, somewhat unsafe or very unsafe?
-
-paz1 - Do you consider that the Peace Accords have been very good, good, bad, or very bad for the country?
-
-ing4 - Changing the subject again, democracy may have problems, but it is better than any other form of government. To what extent do you agree or disagree with this statement?
-
-aoj22new - To reduce crime in a country like ours, penalties for criminals need to increase. Do you agree or disagree with this statement?
-
-dem30 - In your opinion, [country] is a democracy?
-
-dem11 - Do you think that our country needs a government with an iron fist, or do you think that problems can be resolved with everyone's participation?
-
-exc2 - Has a police officer asked you for a bribe in the last twelve months?
-
-M1. Hablando en general acerca del gobierno actual, ¿diría usted que el trabajo que está realizando el Presidente Nayib Bukele es...?: [Leer alternativas] (1) Muy bueno (2) Bueno (3) Ni bueno, ni malo (regular) (4) Malo (5) Muy malo (pésimo) (888888) [NO LEER] No sabe (988888) [NO LEER] No responde (999999) [NO LEER] Inaplicable
-
-T ING4. Puede que la democracia tenga problemas, pero es mejor que cualquier otra forma de gobierno. ¿Hasta qué punto está de acuerdo o en desacuerdo con esta frase? [SOLO LEER DE SER NECESARIO: Por favor, dígame un número entre 1 y 7]
-
-Going to run a logit on M1 p much
 
 ```{r}
 
@@ -117,7 +139,6 @@ LAPOP = LAPOP %>%
 
 # Make a little histogram
 
-
 LAPOP |> 
   filter(!is.na(bukele_perception)) |>
   ggplot(aes(x = bukele_perception)) +
@@ -126,21 +147,14 @@ LAPOP |>
          x = "Perception Category",
          y = "Count") +
     theme_minimal()
-
-# count how many with negaitve vs positive 
-sum(LAPOP$bukele_perception_dummy == 1, na.rm = TRUE)  # Positive perception
-sum(LAPOP$bukele_perception_dummy == 0, na.rm = TRUE)  # Negative perception
-sum(LAPOP$bukele_perception == 'neutral', na.rm = TRUE)  # Positive perception
 ```
 
 ```{r}
 # Run logistic regression
 
-# Basic Model: Violence Exposure (vic1ext), Urbanization, Economic Perspective (idio2) Is country a Democracy (dem30), Close legislature (jc15a)
+# Basic Model: Extortion Exposure (vic1ext), SGL1 (Quality Services by Municpality), Urbanization, Economic Perspective (idio2) Is country a Democracy (dem30), Close legislature (jc15a)
 
-sum(complete.cases(LAPOP[, c("bukele_perception_dummy", "vicbar4a")]))
-
-logit_model <- glm(bukele_perception_dummy ~ vicbar4a + ur1new + idio2 + dem30,
+logit_model <- glm(bukele_perception_dummy ~ vicbar4a  + ur1new + idio2 + dem30,
             data = LAPOP,
             family = binomial(link = "logit")
 )
@@ -148,7 +162,6 @@ logit_model <- glm(bukele_perception_dummy ~ vicbar4a + ur1new + idio2 + dem30,
 stargazer::stargazer(logit_model, digits = 5, type = "text")
 
 exp(coef(logit_model))
-
 
 logit_tidy <- tidy(logit_model, conf.int = TRUE, exponentiate = TRUE) |>
   mutate(term = case_when(
